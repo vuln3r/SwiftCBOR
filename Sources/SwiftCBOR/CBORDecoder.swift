@@ -13,6 +13,10 @@ extension CBOR {
     static public func decode(_ input: [UInt8]) throws -> CBOR? {
         return try CBORDecoder(input: input).decodeItem()
     }
+    
+    static public func decodeRaw(_ input: [UInt8]) throws -> CBOR? {
+        return try CBORDecoder(input: input).decodeItemRaw()
+    }
 }
 
 public class CBORDecoder {

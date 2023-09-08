@@ -102,6 +102,98 @@ public class CBORDecoder {
         }
         return result
     }
+    
+    public func decodeItemRaw() throws -> CBOR? {
+        let b = try istream.popByte()
+        
+        switch b {
+            // positive integers
+        case 0x00...0x1b:
+            return CBOR.unsignedInt(try readVarUInt(b, base: 0x00))
+            
+            // negative integers
+        case 0x20...0x3b:
+            return CBOR.negativeInt(try readVarUInt(b, base: 0x20))
+            
+            // byte strings
+        case 0x40...0x5b:
+            let numBytes = try readLength(b, base: 0x40)
+            return CBOR.byteString(Array(try istream.popBytes(numBytes)))
+        case 0x5f:
+            return CBOR.byteString(try readUntilBreak().flatMap { x -> [UInt8] in
+                guard case .byteString(let r) = x else { throw CBORError.wrongTypeInsideSequence }
+                return r
+            })
+            
+            // utf-8 strings
+        case 0x60...0x7b:
+            let numBytes = try readLength(b, base: 0x60)
+            return CBOR.utf8String(try Util.decodeUtf8(try istream.popBytes(numBytes)))
+        case 0x7f:
+            return CBOR.utf8String(try readUntilBreak().map { x -> String in
+                guard case .utf8String(let r) = x else { throw CBORError.wrongTypeInsideSequence }
+                return r
+            }.joined(separator: ""))
+            
+            // arrays
+        case 0x80...0x9b:
+            let numBytes = try readLength(b, base: 0x80)
+            return CBOR.array(try readN(numBytes))
+        case 0x9f:
+            return CBOR.array(try readUntilBreak())
+            
+            // pairs
+        case 0xa0...0xbb:
+            let numBytes = try readLength(b, base: 0xa0)
+            return CBOR.map(try readNPairs(numBytes))
+        case 0xbf:
+            return CBOR.map(try readPairsUntilBreak())
+            
+            // tagged values
+        case 0xc0...0xdb:
+            let tag = try readVarUInt(b, base: 0xc0)
+            guard let item = try decodeItem() else { throw CBORError.unfinishedSequence }
+#if canImport(Foundation)
+            if tag == 1 {
+                var date: Date
+                switch item {
+                case .double(let d):
+                    date = Date(timeIntervalSince1970: TimeInterval(d))
+                case .negativeInt(let n):
+                    date = Date(timeIntervalSince1970: TimeInterval(n))
+                case .float(let f):
+                    date = Date(timeIntervalSince1970: TimeInterval(f))
+                case .unsignedInt(let u):
+                    date = Date(timeIntervalSince1970: TimeInterval(u))
+                default:
+                    throw CBORError.wrongTypeInsideSequence
+                }
+                return CBOR.date(date)
+            }
+            if tag == 0 {
+                return item
+            }
+#endif
+            return item
+            
+        case 0xe0...0xf3: return CBOR.simple(b - 0xe0)
+        case 0xf4: return CBOR.boolean(false)
+        case 0xf5: return CBOR.boolean(true)
+        case 0xf6: return CBOR.null
+        case 0xf7: return CBOR.undefined
+        case 0xf8: return CBOR.simple(try istream.popByte())
+            
+        case 0xf9:
+            return CBOR.half(Util.readFloat16(x: try readBinaryNumber(UInt16.self)))
+        case 0xfa:
+            return CBOR.float(try readBinaryNumber(Float32.self))
+        case 0xfb:
+            return CBOR.double(try readBinaryNumber(Float64.self))
+            
+        case 0xff: return CBOR.break
+        default: return nil
+        }
+    }
 
     public func decodeItem() throws -> CBOR? {
         let b = try istream.popByte()
